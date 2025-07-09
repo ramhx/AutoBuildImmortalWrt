@@ -71,6 +71,18 @@ jobs:
               exit 1
             fi
           fi
+      
+      - name: Download Clash Meta, GeoIP, and GeoSite
+        run: |
+          PLATFORM="arm64" 
+          mkdir -p files/etc/openclash/core
+          # Download clash_meta
+          META_URL="https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-${PLATFORM}.tar.gz"
+          wget -qO- $META_URL | tar xOvz > files/etc/openclash/core/clash_meta
+          chmod +x files/etc/openclash/core/clash_meta
+          # Download GeoIP and GeoSite
+          wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat -O files/etc/openclash/GeoIP.dat
+          wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat -O files/etc/openclash/GeoSite.dat
 
       - name: Building Rockchip ImmortalWrt
         run: |
@@ -103,22 +115,13 @@ jobs:
             sha256sum "$file" > "$file.sha256"
             sha256sum -c "$file.sha256"
           done
-      
-      - name: Create GitHub Release Info
-        uses: softprops/action-gh-release@v2.1.0
+
+      - name: Upload ImmortWrt as release assets
+        uses: softprops/action-gh-release@v2.2.1
         with:
           tag_name: Autobuild-23.05.4
           name: ImmortWrt-Rockchip
           body_path: ${{ github.workspace }}/info.md
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload ImmortWrt as release assets
-        uses: softprops/action-gh-release@v2.1.0
-        with:
-          tag_name: Autobuild-23.05.4
           files: |
             ${{ github.workspace }}/*.img.gz
             ${{ github.workspace }}/*.sha256

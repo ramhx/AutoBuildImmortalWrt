@@ -1,5 +1,4 @@
-name: build-RaspBerryPi-23.05.4-ImmortalWrt
-
+name: build-gl-inet-24.10.2
 on:
   workflow_dispatch:
     inputs:
@@ -8,12 +7,11 @@ on:
         description: "请选择路由器型号"
         required: true
         options:
-          - rpi
-          - rpi-2
-          - rpi-3
-          - rpi-4
-          - rpi-5
-        default: rpi-4
+          - glinet_gl-mt3000
+          - glinet_gl-mt2500
+          - glinet_gl-mt6000
+          - glinet_gl-b2200
+        default: glinet_gl-mt3000
       include_docker:
         description: |
           是否编译 Docker 插件
@@ -23,10 +21,20 @@ on:
         options:
           - 'yes'
           - 'no'
-      size:
-        description: '请输入要编译固件大小 单位(MB)'
+      enable_pppoe:
+        description: "是否配置PPPoE拨号信息?"
         required: true
-        default: '1024'
+        default: 'no'
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+      pppoe_account:
+        description: "宽带账号 (若启用PPPoE)"
+        required: false
+      pppoe_password:
+        description: "宽带密码 (若启用PPPoE)"
+        required: false
 
 
 jobs:
@@ -39,7 +47,16 @@ jobs:
 
       - name: Set executable permissions
         run: |
-          chmod +x ${{ github.workspace }}/raspberrypi/23.05.4/build.sh
+          chmod +x ${{ github.workspace }}/mediatek-filogic/build.sh
+
+      - name: Validate PPPoE Inputs
+        run: |
+          if [[ "${{ inputs.enable_pppoe }}" == "yes" ]]; then
+            if [[ -z "${{ inputs.pppoe_account }}" || -z "${{ inputs.pppoe_password }}" ]]; then
+              echo "Error: PPPoE account and password must be provided when PPPoE is enabled!"
+              exit 1
+            fi
+          fi
       
       - name: Download Clash Meta, GeoIP, and GeoSite
         run: |
@@ -52,68 +69,64 @@ jobs:
           # Download GeoIP and GeoSite
           wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat -O files/etc/openclash/GeoIP.dat
           wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat -O files/etc/openclash/GeoSite.dat
+      
 
-      - name: Build raspberrypi ImmortalWrt 23.05.4
+      - name: Build Gl-iNet ImmortalWrt 24.10.2
         run: |
           profiles="${{ github.event.inputs.profile }}"
-          if [ "$profiles" = "rpi" ]; then
-            tag=bcm27xx-bcm2708-openwrt-23.05.4
-            echo "cpu=bcm2708" >> $GITHUB_ENV
-          elif [ "$profiles" = "rpi-2" ]; then
-            tag=bcm27xx-bcm2709-openwrt-23.05.4
-            echo "cpu=bcm2709" >> $GITHUB_ENV
-          elif [ "$profiles" = "rpi-3" ]; then
-            tag=bcm27xx-bcm2710-openwrt-23.05.4
-            echo "cpu=bcm2710" >> $GITHUB_ENV
-          elif [ "$profiles" = "rpi-4" ]; then
-            tag=bcm27xx-bcm2711-openwrt-23.05.4
-            echo "cpu=bcm2711" >> $GITHUB_ENV
-          elif [ "$profiles" = "rpi-5" ]; then
-            tag=bcm27xx-bcm2712-openwrt-23.05.4
-            echo "cpu=bcm2712" >> $GITHUB_ENV
-          fi
           include_docker="${{ github.event.inputs.include_docker }}"
-          size="${{ github.event.inputs.size }}"
+    
+          if [ "$profiles" = "glinet_gl-b2200" ]; then
+            tag=ipq40xx-generic-openwrt-24.10.2
+            echo "platform=ipq40xx/generic" >> $GITHUB_ENV
+          else
+            tag=mediatek-filogic-openwrt-24.10.2
+            echo "platform=mediatek/filogic" >> $GITHUB_ENV
+          fi
+          
           IFS=',' read -r -a profile_array <<< "$profiles"
+          
           for profile in "${profile_array[@]}"; do
             echo "Building for profile: $profile"
             
             docker run --rm -i \
               --user root \
               -v "${{ github.workspace }}/bin:/home/build/immortalwrt/bin" \
-              -v "${{ github.workspace }}/files:/home/build/immortalwrt/files" \
-              -v "${{ github.workspace }}/raspberrypi/23.05.4/build.sh:/home/build/openwrt/build.sh" \
+              -v "${{ github.workspace }}/glinet:/home/build/immortalwrt/files/etc/uci-defaults" \
+              -v "${{ github.workspace }}/mediatek-filogic/build-24.sh:/home/build/immortalwrt/build.sh" \
               -e PROFILE=$profile \
               -e INCLUDE_DOCKER=$include_docker \
-              -e ROOTSIZE=$size \
-              immortalwrt/imagebuilder:$tag /bin/bash /home/build/openwrt/build.sh
+              -e ENABLE_PPPOE=${{ inputs.enable_pppoe }} \
+              -e PPPOE_ACCOUNT=${{ inputs.pppoe_account }} \
+              -e PPPOE_PASSWORD=${{ inputs.pppoe_password }} \
+              immortalwrt/imagebuilder:$tag /bin/bash /home/build/immortalwrt/build.sh
           done
-          ls ${{ github.workspace }}/bin/targets/bcm27xx/${{ env.cpu }}
-      
+
       - name: Generate Firmware SHA-256
         run: |
-          cp ${{ github.workspace }}/bin/targets/bcm27xx/${{ env.cpu }}/*squashfs-factory.img.gz  ${{ github.workspace }}
-          for file in *squashfs-factory.img.gz; do
+          cp ${{ github.workspace }}/bin/targets/${{ env.platform }}/*.bin ${{ github.workspace }}
+          for file in *.bin; do
             sha256sum "$file" > "$file.sha256"
             sha256sum -c "$file.sha256"
           done
-      
+
       - name: Create info
         run: |
           if [ "${{ github.event.inputs.include_docker }}" == "yes" ]; then
             extra_content="### 默认带docker"
-            echo -e "\n $extra_content" >> ${{ github.workspace }}/info.md
+            echo -e "\n $extra_content" >> ${{ github.workspace }}/mediatek-filogic/info.md
           else
             echo -e "NO docker"
           fi
-
+          
       - name: Upload ImmortalWrt as release assets
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: Autobuild-raspberrypi
-          body_path: ${{ github.workspace }}/info.md
+          tag_name: Autobuild-GL-iNet
+          name: ImmortalWrt-GL-iNet
+          body_path: ${{ github.workspace }}/mediatek-filogic/info.md
           files: |
-            ${{ github.workspace }}/*.img.gz
+            ${{ github.workspace }}/*.bin
             ${{ github.workspace }}/*.sha256
           token: ${{ secrets.GITHUB_TOKEN }}
         env:
